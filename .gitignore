@@ -1,0 +1,21 @@
+## .NET
+bin/
+obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.userprefs
+
+## VS / Rider
+.idea/
+.vs/
+*.swp
+*~
+
+## OS
+.DS_Store
+Thumbs.db
+
+## Agent
+.reasonix/
