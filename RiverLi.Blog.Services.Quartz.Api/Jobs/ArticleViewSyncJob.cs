@@ -2,27 +2,29 @@
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Quartz;
+using RiverLi.Blog.Services.Quartz.Api.Integration;
 
 namespace RiverLi.Blog.Services.Quartz.Api.Jobs;
 
-// 阻止并发执行：保证同一个 Job 在同一时间只能跑一个实例
 [DisallowConcurrentExecution]
 public class ArticleViewSyncJob : IJob
 {
+    private readonly BlogApiClient _blogApiClient; // 🌟 注入通信客户端
     private readonly ILogger<ArticleViewSyncJob> _logger;
 
-    public ArticleViewSyncJob(ILogger<ArticleViewSyncJob> logger)
+    public ArticleViewSyncJob(BlogApiClient blogApiClient, ILogger<ArticleViewSyncJob> logger)
     {
+        _blogApiClient = blogApiClient;
         _logger = logger;
     }
 
     public async Task Execute(IJobExecutionContext context)
     {
-        _logger.LogInformation("🚀 [Quartz] 开始执行文章阅读量同步任务: {Time}", DateTime.Now);
+        _logger.LogInformation("🚀 [Quartz] 开始执行跨服务任务: 文章阅读量同步");
         
-        // 模拟业务耗时
-        await Task.Delay(2000); 
+        // 🌟 真正发起跨微服务 HTTP 调用
+        await _blogApiClient.SyncArticleViewsAsync();
         
-        _logger.LogInformation("✅ [Quartz] 文章阅读量同步完成!");
+        _logger.LogInformation("✅ [Quartz] 跨服务任务执行完成!");
     }
 }
