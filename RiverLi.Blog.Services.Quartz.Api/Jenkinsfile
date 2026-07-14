@@ -1,0 +1,70 @@
+// =============================================================================
+// Jenkins Pipeline — riverli-blog-quartz (定时任务调度服务)
+// =============================================================================
+// 用途：自动构建 Docker 镜像 → 推送到 GitHub Container Registry → 更新 K8s 配置库
+// 注意：本服务为单项目解决方案，无内部类库依赖，Dockerfile 结构较简单
+// 对应 K8s 编排文件：apps/quartz.yaml
+// =============================================================================
+
+pipeline {
+    agent any
+
+    environment {
+        IMAGE_NAME = "ghcr.io/strive9930/riverli-blog-quartz"
+        IMAGE_TAG = "v${BUILD_NUMBER}"
+        MANIFEST_REPO = "github.com/strive9930/riverli-k8s-manifests.git"
+    }
+
+    stages {
+        stage('📥 1. 检出业务代码') {
+            steps {
+                echo "开始构建微服务: ${IMAGE_NAME}:${IMAGE_TAG}"
+            }
+        }
+
+        stage('📦 2. 构建并推送公共镜像') {
+            steps {
+                script {
+                    // -f 指定 RiverLi.Blog.Services.Quartz.Api 目录下的 Dockerfile
+                    sh "docker build -t ${IMAGE_NAME}:${IMAGE_TAG} -f RiverLi.Blog.Services.Quartz.Api/Dockerfile ."
+                    sh "docker build -t ${IMAGE_NAME}:latest -f RiverLi.Blog.Services.Quartz.Api/Dockerfile ."
+
+                    withCredentials([usernamePassword(
+                        credentialsId: 'github-registry-credentials',
+                        usernameVariable: 'REG_USER',
+                        passwordVariable: 'REG_PASS'
+                    )]) {
+                        sh 'echo $REG_PASS | docker login ghcr.io -u $REG_USER --password-stdin'
+                        sh "docker push ${IMAGE_NAME}:${IMAGE_TAG}"
+                        sh "docker push ${IMAGE_NAME}:latest"
+                    }
+                }
+            }
+        }
+
+        stage('🔄 3. 跨仓库改写 K8s 配置库 (GitOps 核心)') {
+            steps {
+                script {
+                    sh 'rm -rf manifest-folder'
+
+                    withCredentials([string(credentialsId: 'github-token', variable: 'GITHUB_TOKEN')]) {
+                        sh 'git clone https://$GITHUB_TOKEN@github.com/strive9930/riverli-k8s-manifests.git manifest-folder'
+                    }
+
+                    dir('manifest-folder') {
+                        sh "sed -i 's|image: ${IMAGE_NAME}:.*|image: ${IMAGE_NAME}:${IMAGE_TAG}|g' apps/quartz.yaml"
+
+                        sh 'git config user.name "Jenkins CI"'
+                        sh 'git config user.email "jenkins@riverli.com"'
+                        sh 'git add apps/quartz.yaml'
+                        sh "git commit -m '🤖 Jenkins 自动触发发版: ${IMAGE_NAME}:${IMAGE_TAG}'"
+
+                        withCredentials([string(credentialsId: 'github-token', variable: 'GITHUB_TOKEN')]) {
+                            sh 'git push https://$GITHUB_TOKEN@github.com/strive9930/riverli-k8s-manifests.git main'
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

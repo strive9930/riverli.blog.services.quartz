@@ -17,7 +17,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\riverli.blog.infrastructure.shared\RiverLi.Blog.Infrastructure.Shared.csproj" />
+    <!-- ⚠️ 原为 ProjectReference(..\..\riverli.blog.infrastructure.shared)，为兼容 Docker 构建改为 NuGet 包引用 -->
+    <PackageReference Include="RiverLi.Blog.Infrastructure.Shared" Version="1.0.3" />
   </ItemGroup>
 
 </Project>

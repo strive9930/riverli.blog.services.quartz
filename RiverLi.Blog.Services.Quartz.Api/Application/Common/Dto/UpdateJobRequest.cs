@@ -8,6 +8,15 @@ public class UpdateJobRequest
     /// <summary>新的 Cron 表达式（留空则不更新）</summary>
     public string? CronExpression { get; set; }
 
+    /// <summary>触发器类型: "cron" 或 "simple"</summary>
+    public string? TriggerType { get; set; }
+
+    /// <summary>Simple Trigger: 间隔秒数</summary>
+    public int? IntervalSeconds { get; set; }
+
+    /// <summary>Simple Trigger: 重复次数（-1=无限重复）</summary>
+    public int? RepeatCount { get; set; }
+
     /// <summary>新的请求 URL</summary>
     public string? RequestUrl { get; set; }
 
