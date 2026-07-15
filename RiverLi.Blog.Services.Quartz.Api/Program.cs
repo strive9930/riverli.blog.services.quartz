@@ -58,7 +58,7 @@ builder.Services.AddQuartz(q =>
         s.UseMySqlConnector(sql =>
         {
             sql.ConnectionString = connectionString;
-            sql.TablePrefix = "qrtz_"; 
+            sql.TablePrefix = "QRTZ_"; 
         });
         s.UseSystemTextJsonSerializer();
     });
