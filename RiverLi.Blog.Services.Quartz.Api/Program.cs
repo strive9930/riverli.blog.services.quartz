@@ -27,7 +27,12 @@ builder.Services.AddInfrastructureSharedServices(options =>
 {
     options.EnableGlobalExceptionHandler = true;
     options.EnableCors = true;
-    options.AllowedOrigins = new[] { "http://localhost:5000", "http://localhost:3000", "http://localhost:5173" };
+    options.AllowedOrigins = new[] { "http://localhost:5000", 
+        "http://localhost:3000", 
+        "http://localhost:5173" ,
+        "http://192.168.16.11:30081", // 部署环境的真实前端 Vue 地址
+        "http://192.168.16.11:30089"  // 网关暴露的统一地址（方便网关转发时携带跨域头）
+    };
     options.EnableOpenApiDocumentation = true;
     options.ScalarTitle = "RiverLi Blog Quartz API";
     options.ScalarVersion = "v1";
@@ -40,7 +45,7 @@ builder.Services.AddHealthCheckSupport(builder.Configuration);
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
 
-var connectionString = builder.Configuration.GetConnectionString("DefaultConnection") 
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
                        ?? throw new InvalidOperationException("未找到数据库配置");
 // 🌟 1. 注册 RiverLi 专属的 Dapper 基础设施
 builder.Services.AddRiverLiDapperMySql(connectionString);
@@ -58,11 +63,11 @@ builder.Services.AddQuartz(q =>
         s.UseMySqlConnector(sql =>
         {
             sql.ConnectionString = connectionString;
-            sql.TablePrefix = "QRTZ_"; 
+            sql.TablePrefix = "QRTZ_";
         });
         s.UseSystemTextJsonSerializer();
     });
-    
+
     // 🌟 将我们的日志监听器注册为单例并挂载到全局
     builder.Services.AddSingleton<ExecutionLogListener>();
     q.AddJobListener<ExecutionLogListener>();
@@ -79,9 +84,9 @@ builder.Services.AddQuartz(q =>
         .StoreDurably()
     );
     q.AddTrigger(opts => opts
-        .ForJob(publishJobKey)
-        .WithIdentity("PublishScheduledArticles_Trigger", "SystemJobs")
-        .WithCronSchedule("0 * * * * ?") // 每分钟第 0 秒执行
+            .ForJob(publishJobKey)
+            .WithIdentity("PublishScheduledArticles_Trigger", "SystemJobs")
+            .WithCronSchedule("0 * * * * ?") // 每分钟第 0 秒执行
     );
 
     #region 测试任务
@@ -98,7 +103,6 @@ builder.Services.AddQuartz(q =>
     // );
 
     #endregion
-    
 });
 
 // 3. 将 Quartz 注册为托管服务 (随 WebApi 启动而启动)
@@ -108,44 +112,45 @@ builder.Services.AddQuartzHostedService(options =>
 });
 
 
-// 命名客户端 "BlogApiClient" —— 供 HttpDispatchJob 动态调度使用
+// 从 appsettings.json 或环境变量中动态读取 BaseAddress
+var blogServiceUrl = builder.Configuration["Services:BlogServiceUrl"] ?? "http://localhost:5002";
+
 builder.Services.AddHttpClient("BlogApiClient", client =>
 {
-    client.BaseAddress = new Uri("http://localhost:5000"); 
+    client.BaseAddress = new Uri(blogServiceUrl);
     client.DefaultRequestHeaders.Add("X-Internal-Secret", "RiverLi_Super_Secret_2026");
 });
 
-// 类型化客户端 BlogApiClient —— 供业务代码强类型注入使用
 builder.Services.AddHttpClient<BlogApiClient>(client =>
-{
-    client.BaseAddress = new Uri("http://localhost:5000"); 
-    client.DefaultRequestHeaders.Add("X-Internal-Secret", "RiverLi_Super_Secret_2026");
-})
+    {
+        client.BaseAddress = new Uri(blogServiceUrl);
+        client.DefaultRequestHeaders.Add("X-Internal-Secret", "RiverLi_Super_Secret_2026");
+    })
 // 🌟 为这个 HttpClient 挂载量身定制的 Polly 弹性管道
-.AddResilienceHandler("blog-api-pipeline", resilienceBuilder =>
-{
-    // 1. 超时策略 (Timeout) - 防卡死
-    // 如果请求超过 10 秒还没响应，直接抛出 TimeoutRejectedException，不让线程一直傻等
-    resilienceBuilder.AddTimeout(TimeSpan.FromSeconds(10));
-
-    // 2. 重试策略 (Retry) - 防网络抖动
-    resilienceBuilder.AddRetry(new HttpRetryStrategyOptions
+    .AddResilienceHandler("blog-api-pipeline", resilienceBuilder =>
     {
-        MaxRetryAttempts = 3, // 最多重试 3 次
-        Delay = TimeSpan.FromSeconds(2), // 初始等待时间 2 秒
-        BackoffType = DelayBackoffType.Exponential, // 指数退避：等待时间会变成 2s, 4s, 8s...
-        // 默认会自动捕获 5xx 错误、408 请求超时以及网络异常进行重试
-    });
+        // 1. 超时策略 (Timeout) - 防卡死
+        // 如果请求超过 10 秒还没响应，直接抛出 TimeoutRejectedException，不让线程一直傻等
+        resilienceBuilder.AddTimeout(TimeSpan.FromSeconds(10));
 
-    // 3. 熔断器策略 (Circuit Breaker) - 防雪崩
-    resilienceBuilder.AddCircuitBreaker(new HttpCircuitBreakerStrategyOptions
-    {
-        FailureRatio = 0.5, // 错误率阈值：如果 50% 的请求都失败了
-        SamplingDuration = TimeSpan.FromSeconds(30), // 在 30 秒的统计窗口内
-        MinimumThroughput = 5, // 且至少有 5 个请求打过来
-        BreakDuration = TimeSpan.FromSeconds(30) // 触发熔断！接下来 30 秒内所有请求直接拦截报错，给下游 Blog.Api 喘息恢复的时间
+        // 2. 重试策略 (Retry) - 防网络抖动
+        resilienceBuilder.AddRetry(new HttpRetryStrategyOptions
+        {
+            MaxRetryAttempts = 3, // 最多重试 3 次
+            Delay = TimeSpan.FromSeconds(2), // 初始等待时间 2 秒
+            BackoffType = DelayBackoffType.Exponential, // 指数退避：等待时间会变成 2s, 4s, 8s...
+            // 默认会自动捕获 5xx 错误、408 请求超时以及网络异常进行重试
+        });
+
+        // 3. 熔断器策略 (Circuit Breaker) - 防雪崩
+        resilienceBuilder.AddCircuitBreaker(new HttpCircuitBreakerStrategyOptions
+        {
+            FailureRatio = 0.5, // 错误率阈值：如果 50% 的请求都失败了
+            SamplingDuration = TimeSpan.FromSeconds(30), // 在 30 秒的统计窗口内
+            MinimumThroughput = 5, // 且至少有 5 个请求打过来
+            BreakDuration = TimeSpan.FromSeconds(30) // 触发熔断！接下来 30 秒内所有请求直接拦截报错，给下游 Blog.Api 喘息恢复的时间
+        });
     });
-});
 
 var app = builder.Build();
 
@@ -160,9 +165,10 @@ app.UseHttpsRedirection();
 app.UseInfrastructureSharedMiddlewares();
 app.UseAuthentication();
 app.UseAuthorization();
-app.MapControllers();// 映射我们后面要写的 JobsController
+app.MapControllers(); // 映射我们后面要写的 JobsController
 
-app.MapInfrastructureSharedEndpoints(options => {
+app.MapInfrastructureSharedEndpoints(options =>
+{
     options.EnableOpenApiDocumentation = app.Environment.IsDevelopment();
     options.ScalarTitle = "RiverLi Blog Quartz API";
 });
